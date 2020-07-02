@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct Request {
@@ -52,78 +54,26 @@ impl<T> Data<T> {
 
 impl<T> DataFactory for Data<T> {}
 
-pub(crate) trait Factory<T, R, O>: Clone + 'static
+pub(crate) trait Factory<P, D, R, O>: Clone + 'static
 where
-    O: Serialize,
-    R: Future<Output = O>,
-{
-    fn call(&self, params: T) -> R;
-}
-
-impl<F, R, O> Factory<(), R, O> for F
-where
-    F: Fn() -> R + Clone + 'static,
-    O: Serialize,
-    R: Future<Output = O>,
-{
-    fn call(&self, _: ()) -> R {
-        (self)()
-    }
-}
-
-impl<F, R, O, D> Factory<(Data<D>,), R, O> for F
-where
-    F: Fn(Data<D>) -> R + Clone + 'static,
-    O: Serialize,
-    R: Future<Output = O>,
-{
-    fn call(&self, params: (Data<D>,)) -> R {
-        (self)(params.0)
-    }
-}
-
-impl<F, R, O, P> Factory<(P,), R, O> for F
-where
-    F: Fn(P) -> R + Clone + 'static,
-    O: Serialize,
-    R: Future<Output = O>,
     P: for<'de> Deserialize<'de>,
-{
-    fn call(&self, params: (P,)) -> R {
-        (self)(params.0)
-    }
-}
-
-impl<F, R, O, D, P> Factory<(Data<D>, P), R, O> for F
-where
-    F: Fn(Data<D>, P) -> R + Clone + 'static,
     O: Serialize,
     R: Future<Output = O>,
-    P: for<'de> Deserialize<'de>,
 {
-    fn call(&self, params: (Data<D>, P)) -> R {
-        (self)(params.0, params.1)
-    }
-}
-
-impl<F, R, O, D, P> Factory<(P, Data<D>), R, O> for F
-where
-    F: Fn(P, Data<D>) -> R + Clone + 'static,
-    O: Serialize,
-    R: Future<Output = O>,
-    P: for<'de> Deserialize<'de>,
-{
-    fn call(&self, params: (P, Data<D>)) -> R {
-        (self)(params.0, params.1)
-    }
+    fn call_tuple(&self, data: Data<D>, param: P) -> R;
 }
 
 pub struct Server {
     map: HashMap<
         String,
-        Box<dyn Fn(Request) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>>,
+        Box<
+            dyn Fn(
+                Arc<dyn Any>,
+                Request,
+            ) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>,
+        >,
     >,
-    state: Option<Box<dyn DataFactory>>,
+    state: Option<Arc<dyn Any>>,
 }
 
 impl Server {
@@ -134,30 +84,36 @@ impl Server {
         }
     }
 
-    pub fn to<P, F, R, E, H>(mut self, key: String, handle: H) -> Self
+    pub fn to<P, F, R, E, H, T>(mut self, key: String, handle: H) -> Self
     where
         P: for<'de> Deserialize<'de> + Send + 'static,
         R: Serialize + 'static,
         E: Serialize + 'static,
         F: Future<Output = Result<R, E>> + Send + 'static,
-        H: Fn(P) -> F + 'static + Clone + Send,
+        H: Fn(Data<T>, P) -> F + 'static + Clone + Send,
     {
         let inner_handle =
-            move |req: Request| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
-                async fn inner<P, R, E, F, H>(req: Request, handle: H) -> serde_json::Value
+            move |data: Arc<dyn Any>,
+                  req: Request|
+                  -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
+                async fn inner<P, R, E, F, H, T>(
+                    data: Data<T>,
+                    req: Request,
+                    handle: H,
+                ) -> serde_json::Value
                 where
                     P: for<'de> Deserialize<'de> + Send + 'static,
                     R: Serialize + 'static,
                     E: Serialize + 'static,
                     F: Future<Output = Result<R, E>> + Send + 'static,
-                    H: Fn(P) -> F + 'static + Clone,
+                    H: Fn(Data<T>, P) -> F + 'static + Clone,
                 {
                     let params: P = serde_json::from_value(req.params).unwrap();
-                    let _r = (handle)(params);
+                    let _r = (handle)(data, params);
                     let result = Response::new(req.id, _r.await);
                     serde_json::to_value(result).unwrap()
                 }
-                Box::pin(inner(req, handle.clone()))
+                Box::pin(inner(data, req, handle.clone()))
             };
         self.map.insert(key, Box::new(inner_handle));
         self
@@ -165,8 +121,15 @@ impl Server {
 
     pub fn data<D: 'static>(mut self, d: D) -> Self {
         if self.state.is_none() {
-            self.state = Some(Box::new(Data::new(d)))
+            self.state = Some(Arc::new(Data::new(d)))
         }
         self
+    }
+
+    pub async fn recv(&self, input: serde_json::Value) -> serde_json::Value {
+        let r: Request = serde_json::from_value(input).unwrap();
+        let h = self.map.get(&r.method).unwrap();
+        let d = self.state.as_ref().unwrap();
+        h(d.clone(), r).await
     }
 }
