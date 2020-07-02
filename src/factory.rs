@@ -1,6 +1,7 @@
 use crate::data::{Data, DataExtensions, DataFactory};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
+use std::sync::Arc;
 
 pub(crate) trait Factory<T, InnerT, R, O>: Clone + 'static
 where
@@ -21,14 +22,14 @@ where
     }
 }
 
-impl<F, R, O, T> Factory<(&DataExtensions,), (Data<T>,), R, O> for F
+impl<F, R, O, T> Factory<(Arc<DataExtensions>,), (Data<T>,), R, O> for F
 where
     F: Fn(Data<T>) -> R + Clone + 'static,
     O: Serialize,
     R: Future<Output = O>,
     T: 'static,
 {
-    fn call(&self, params: (&DataExtensions,)) -> R {
+    fn call(&self, params: (Arc<DataExtensions>,)) -> R {
         (self)(params.0.get::<Data<T>>().unwrap().clone())
     }
 }
@@ -45,7 +46,7 @@ where
     }
 }
 
-impl<F, R, O, T, P> Factory<(&DataExtensions, P), (Data<T>, P), R, O> for F
+impl<F, R, O, T, P> Factory<(Arc<DataExtensions>, P), (Data<T>, P), R, O> for F
 where
     F: Fn(Data<T>, P) -> R + Clone + 'static,
     O: Serialize,
@@ -53,12 +54,12 @@ where
     P: for<'de> Deserialize<'de>,
     T: 'static,
 {
-    fn call(&self, params: (&DataExtensions, P)) -> R {
+    fn call(&self, params: (Arc<DataExtensions>, P)) -> R {
         (self)(params.0.get::<Data<T>>().unwrap().clone(), params.1)
     }
 }
 
-impl<F, R, O, T, P> Factory<(&DataExtensions, P), (P, Data<T>), R, O> for F
+impl<F, R, O, T, P> Factory<(Arc<DataExtensions>, P), (P, Data<T>), R, O> for F
 where
     F: Fn(P, Data<T>) -> R + Clone + 'static,
     O: Serialize,
@@ -66,7 +67,7 @@ where
     P: for<'de> Deserialize<'de>,
     T: 'static,
 {
-    fn call(&self, params: (&DataExtensions, P)) -> R {
+    fn call(&self, params: (Arc<DataExtensions>, P)) -> R {
         (self)(params.1, params.0.get::<Data<T>>().unwrap().clone())
     }
 }

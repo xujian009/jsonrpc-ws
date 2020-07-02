@@ -28,12 +28,14 @@ pub(crate) trait DataFactory {
 pub struct DataExtensions(FxHashMap<TypeId, Box<dyn Any>>);
 
 impl DataExtensions {
-    pub fn insert<T: Clone + 'static>(&self, t: T) {
-        unsafe {self.0.insert(TypeId::of::<T>(), Box::new(t));}
+    pub fn insert<T: Clone + 'static>(&mut self, t: T) {
+        self.0.insert(TypeId::of::<T>(), Box::new(t));
     }
 }
 
 unsafe impl Sync for DataExtensions {}
+
+unsafe impl Send for DataExtensions {}
 
 impl Default for DataExtensions {
     fn default() -> Self {

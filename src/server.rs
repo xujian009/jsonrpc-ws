@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use crate::factory::Factory;
+use std::sync::Arc;
 
 #[derive(Deserialize, Debug)]
 pub struct Request {
@@ -19,37 +20,37 @@ pub struct Request {
 pub struct Server {
     map: HashMap<
         String,
-        Box<dyn Fn(Request) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>>,
+        Box<dyn Fn(Arc<DataExtensions>, Request) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>>,
     >,
-    extensions: DataExtensions,
+    extensions: Arc<DataExtensions>,
 }
 
 impl Server {
     pub fn new() -> Self {
         Server {
             map: HashMap::new(),
-            extensions: DataExtensions::default(),
+            extensions: Arc::new(DataExtensions::default()),
         }
     }
 
-    pub fn to<P, F, R, E, H, T>(mut self, key: String, handle: H) -> Self
+    pub fn to<'a, P, F, R, E, H, T>(mut self, key: String, handle: H) -> Self
     where
         P: for<'de> Deserialize<'de> + Send + 'static,
         R: Serialize + 'static,
         E: Serialize + Into<JsonRpcError> + 'static,
         F: Future<Output = Result<R, E>> + Send + 'static,
-        H: Factory<(&'static DataExtensions, P), (Data<T>, P), F, Result<R, E>> + Send + 'static,
+        H: Factory<(Arc<DataExtensions>, P), (Data<T>, P), F, Result<R, E>> + Clone + Send + 'static,
         T: 'static,
     {
         let inner_handle =
-            move |req: Request| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
-                async fn inner<P, R, E, F, H, T>(extensions: &'static DataExtensions, req: Request, handle: H) -> serde_json::Value
+            |extensions: Arc<DataExtensions>, req: Request| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
+                async fn inner<P, R, E, F, H, T>(extensions: Arc<DataExtensions>, req: Request, handle: H) -> serde_json::Value
                 where
                     P: for<'de> Deserialize<'de> + Send + 'static,
                     R: Serialize + 'static,
                     E: Serialize + Into<JsonRpcError> + 'static,
                     F: Future<Output = Result<R, E>> + Send + 'static,
-                    H: Factory<(&'static DataExtensions, P), (Data<T>, P), F, Result<R, E>> + Send + 'static,
+                    H: Factory<(Arc<DataExtensions>, P), (Data<T>, P), F, Result<R, E>> + Clone + Send + 'static,
                     T: 'static,
                 {
                     let params: P = serde_json::from_value(req.params).unwrap();
@@ -65,14 +66,14 @@ impl Server {
                         }
                     }
                 }
-                Box::pin(inner(&self.extensions, req, handle))
+                Box::pin(inner(extensions.clone(), req, handle.clone()))
             };
         self.map.insert(key, Box::new(inner_handle));
         self
     }
 
     pub fn data<D: 'static>(mut self, d: D) -> Self {
-        self.extensions.insert(Data::new(d));
+        Arc::get_mut(&mut self.extensions).unwrap().insert(Data::new(d));
         self
     }
 
@@ -85,6 +86,6 @@ impl Server {
             None => return serde_json::to_value(JsonRpc::error(req.id, JsonRpcError::method_not_found())).unwrap(),
         };
 
-        handle(req).await
+        handle(self.extensions.clone(), req).await
     }
 }
