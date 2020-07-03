@@ -7,6 +7,7 @@ use std::future::Future;
 use std::pin::Pin;
 use crate::factory::Factory;
 use std::sync::Arc;
+use crate::data::DataFactory;
 
 #[derive(Deserialize, Debug)]
 pub struct Request {
@@ -39,23 +40,27 @@ impl Server {
         R: Serialize + 'static,
         E: Serialize + Into<JsonRpcError> + 'static,
         F: Future<Output = Result<R, E>> + Send + 'static,
-        H: Factory<(Arc<DataExtensions>, P), (Data<T>, P), F, Result<R, E>> + Clone + Send + 'static,
-        T: 'static,
+        H: Fn(Data<T>, P) -> F + 'static + Clone + Send + Sync,
+        T: 'static + Sync + Send,
     {
         let inner_handle =
-            |extensions: Arc<DataExtensions>, req: Request| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
+            move |extensions: Arc<DataExtensions>, req: Request| -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>> {
                 async fn inner<P, R, E, F, H, T>(extensions: Arc<DataExtensions>, req: Request, handle: H) -> serde_json::Value
                 where
                     P: for<'de> Deserialize<'de> + Send + 'static,
                     R: Serialize + 'static,
                     E: Serialize + Into<JsonRpcError> + 'static,
                     F: Future<Output = Result<R, E>> + Send + 'static,
-                    H: Factory<(Arc<DataExtensions>, P), (Data<T>, P), F, Result<R, E>> + Clone + Send + 'static,
-                    T: 'static,
+                    H: Fn(Data<T>, P) -> F + 'static + Clone + Send + Sync,
+                    T: 'static + Sync + Send,
                 {
-                    let params: P = serde_json::from_value(req.params).unwrap();
-                    let _r = (handle).call((extensions, params));
-                    match _r.await {
+                    let params: P = match serde_json::from_value(req.params){
+                        Ok(params) => params,
+                        Err(err) => return serde_json::to_value(JsonRpc::error(req.id, JsonRpcError::invalid_params())).unwrap(),
+                    };
+                    
+                    let data_t = extensions.get::<Data<T>>().unwrap().clone();
+                    match (handle).call((data_t, params)).await {
                         Ok(result) => serde_json::to_value(JsonRpc::success(
                             req.id,
                             &serde_json::to_value(result).unwrap(),
@@ -66,7 +71,7 @@ impl Server {
                         }
                     }
                 }
-                Box::pin(inner(extensions.clone(), req, handle.clone()))
+                Box::pin(inner(extensions, req, handle.clone()))
             };
         self.map.insert(key, Box::new(inner_handle));
         self
