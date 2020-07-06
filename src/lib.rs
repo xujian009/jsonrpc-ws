@@ -1,4 +1,4 @@
-#![feature(get_mut_unchecked)]
+#![feature(type_alias_impl_trait)]
 #![feature(fn_traits)]
 
 mod data;

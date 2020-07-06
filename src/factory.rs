@@ -1,7 +1,6 @@
-use crate::data::{Data};
+use crate::data::Data;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
-
 
 pub(crate) trait Factory<T, R, O>: Clone + 'static
 where
@@ -23,4 +22,3 @@ where
         (self)(params.0, params.1)
     }
 }
-
