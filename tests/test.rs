@@ -1,12 +1,13 @@
 use jsonrpc_lite::Error as JsonRpcError;
-use jsonrpc_lite::JsonRpc;
-use jsonrpc_ws::server::Server;
+use jsonrpc_ws::route::Route;
 use jsonrpc_ws::Data;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::time::{self, Duration};
+use jsonrpc_ws::route::route_jsonrpc;
+
 
 #[derive(Debug)]
 pub struct ShareStateTest {
@@ -67,63 +68,9 @@ async fn time_sleep(timeout_ms: u64) {
     time::delay_for(Duration::from_millis(timeout_ms.into())).await;
 }
 
-fn server_route_error() -> JsonRpcError {
-    JsonRpcError {
-        code: -32500,
-        message: "Server Internal Route error".to_string(),
-        data: None,
-    }
-}
-
-/// 传入jsonrpc请求
-///   返回结果
-pub async fn route_jsonrpc(server: Arc<Server>, req_str: Value) -> Value {
-    match req_str {
-        Value::Object(_) => match server.route_once(req_str).await {
-            Ok(fut) => fut.await,
-            Err(err) => err,
-        },
-        Value::Array(array) => {
-            let localtask = tokio::task::LocalSet::new();
-            let share_outputs = Arc::new(Mutex::new(Vec::<Value>::new()));
-
-            for each in array {
-                let inner_server = Arc::downgrade(&server);
-                let share_outputs = share_outputs.clone();
-
-                localtask.spawn_local(async move {
-                    // task开始执行是尝试获取server对象
-                    let output = match inner_server.upgrade() {
-                        Some(server) => match server.route_once(each).await {
-                            Ok(fut) => fut.await,
-                            Err(err) => err,
-                        },
-                        None => serde_json::to_value(server_route_error()).unwrap(),
-                    };
-
-                    let mut outputs = share_outputs.lock().unwrap();
-                    outputs.push(output);
-                });
-            }
-            localtask.await;
-
-            // TODO 内部panic可能要处理
-            // outputs Arc持有者只剩下一个，此处取出不会失败，也不考虑失败处理
-            let output = if let Ok(outputs) = Arc::try_unwrap(share_outputs) {
-                // 锁持有者同理
-                outputs.into_inner().unwrap()
-            } else {
-                panic!("Arc<Mutex<>> into_inner failed");
-            };
-            Value::Array(output)
-        }
-        _ => return serde_json::to_value(JsonRpc::error((), JsonRpcError::parse_error())).unwrap(),
-    }
-}
-
 #[test]
 fn test_server_simple() {
-    let server = Server::new()
+    let route = Route::new()
         .data(ShareStateTest {
             a: Mutex::new(100u64),
             b: Mutex::new("abcdefg".to_string()),
@@ -133,7 +80,7 @@ fn test_server_simple() {
     let mut runtime = tokio::runtime::Runtime::new().unwrap();
 
     runtime.block_on(async move {
-        let resp = server
+        let resp = route
             .route_once(json!({
                 "jsonrpc": "2.0",
                 "method": "route_b",
@@ -158,8 +105,8 @@ fn test_server_simple() {
 
 #[tokio::test]
 async fn test_server_route_and_array() {
-    let server = Arc::new(
-        Server::new()
+    let route = Arc::new(
+        Route::new()
             .data(ShareStateTest {
                 a: Mutex::new(100u64),
                 b: Mutex::new("abcdefg".to_string()),
@@ -168,16 +115,16 @@ async fn test_server_route_and_array() {
     );
 
     let tasks = async move {
-        let resp = route_jsonrpc(
-            server.clone(),
-            json!({
+        let resp: Value = serde_json::from_str(&route_jsonrpc(
+            route.clone(),
+            &json!({
                 "jsonrpc": "2.0",
                 "method": "route_b",
                 "params": {"err_param": 1},
                 "id": 99,
-            }),
+            }).to_string(),
         )
-        .await;
+        .await).unwrap();
 
         assert_eq!(
             json!({"error":{"code":-32602,"message":"Invalid params"},"id":99,"jsonrpc":"2.0"})
@@ -185,9 +132,9 @@ async fn test_server_route_and_array() {
             resp.to_string()
         );
 
-        let resp = route_jsonrpc(
-            server.clone(),
-            json!([{
+        let resp: Value = serde_json::from_str(&route_jsonrpc(
+            route.clone(),
+            &json!([{
                 "jsonrpc": "2.0",
                 "method": "route_b",
                 "params": {"err_param": 1},
@@ -202,9 +149,9 @@ async fn test_server_route_and_array() {
                 "method": "route_b",
                 "params": {"a": 8888u64, "b":"_8888_", "c":["c","_string_","_8888_"]},
                 "id": 93,
-            }]),
+            }]).to_string(),
         )
-        .await;
+        .await).unwrap();
 
         let resp_vec = match resp {
             Value::Array(array) => array,
@@ -236,7 +183,5 @@ async fn test_server_route_and_array() {
         assert_eq!(8888u64 * 2 + 101 + 102, ans_9293_a_sum);
     };
 
-    let local = tokio::task::LocalSet::new();
-
-    local.run_until(tasks).await;
+    tokio::spawn(tasks).await.unwrap();
 }

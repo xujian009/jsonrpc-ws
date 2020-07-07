@@ -7,7 +7,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use futures_util::future::join_all;
+use crate::server_route_error;
+
 
 #[derive(Deserialize, Debug)]
 pub struct Request {
@@ -17,7 +20,7 @@ pub struct Request {
     pub id: i64,
 }
 
-pub struct Server {
+pub struct Route {
     map: HashMap<
         String,
         Box<dyn Fn(Arc<DataExtensions>, Request) -> Pin<Box<dyn Future<Output = Value> + Send>>>,
@@ -25,9 +28,13 @@ pub struct Server {
     extensions: Arc<DataExtensions>,
 }
 
-impl Server {
+unsafe impl Sync for Route {}
+
+unsafe impl Send for Route {}
+
+impl Route {
     pub fn new() -> Self {
-        Server {
+        Route {
             map: HashMap::new(),
             extensions: Arc::new(DataExtensions::default()),
         }
@@ -112,4 +119,64 @@ impl Server {
 
         Ok(handle(self.extensions.clone(), req))
     }
+}
+
+/// 传入jsonrpc请求
+///   返回结果
+pub async fn route_jsonrpc(server: Arc<Route>, req_str: &str) -> String {
+    let req: Value = match serde_json::from_str(req_str) {
+        Ok(req) => req,
+        Err(_) => {
+            return serde_json::to_value(JsonRpc::error((), JsonRpcError::parse_error()))
+                .unwrap()
+                .to_string()
+        }
+    };
+    let resp = match req {
+        Value::Object(_) => match server.route_once(req).await {
+            Ok(fut) => fut.await,
+            Err(err) => err,
+        },
+        Value::Array(array) => {
+            let share_outputs = Arc::new(Mutex::new(Vec::<Value>::new()));
+            let mut tasks = Vec::new();
+
+            for each in array {
+                let inner_server = Arc::downgrade(&server);
+                let share_outputs = share_outputs.clone();
+
+                tasks.push(async move {
+                    // task开始执行是尝试获取server对象
+                    let output = match inner_server.upgrade() {
+                        Some(server) => match server.route_once(each).await {
+                            Ok(fut) => fut.await,
+                            Err(err) => err,
+                        },
+                        None => serde_json::to_value(server_route_error()).unwrap(),
+                    };
+
+                    let mut outputs = share_outputs.lock().unwrap();
+                    outputs.push(output);
+                });
+            }
+            join_all(tasks).await;
+
+            // TODO 内部panic可能要处理
+            // outputs Arc持有者只剩下一个，此处取出不会失败，也不考虑失败处理
+            let output = if let Ok(outputs) = Arc::try_unwrap(share_outputs) {
+                // 锁持有者同理
+                outputs.into_inner().unwrap()
+            } else {
+                panic!("Arc<Mutex<>> into_inner failed");
+            };
+            Value::Array(output)
+        }
+        _ => {
+            return serde_json::to_value(JsonRpc::error((), JsonRpcError::parse_error()))
+                .unwrap()
+                .to_string()
+        }
+    };
+
+    resp.to_string()
 }
