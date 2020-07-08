@@ -18,7 +18,7 @@ tokio-tungstenite = "0.10.1"
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "sink", "std"] }
 url = "2.0.0"
 jsonrpc-lite = "0.5.0"
-jsonrpc = { path = "../../jsonrpc-ws" }
+jsonrpc-core = { path = "../" }
 log = "0.4.8"
 
 

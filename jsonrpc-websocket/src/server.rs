@@ -1,6 +1,6 @@
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use jsonrpc::route::{route_jsonrpc, Route};
+use jsonrpc_core::route::{route_jsonrpc, Route};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;

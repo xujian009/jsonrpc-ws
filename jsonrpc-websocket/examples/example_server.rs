@@ -1,7 +1,7 @@
 extern crate jsonrpc_websocket;
 
-use jsonrpc::route::Route;
-use jsonrpc::Data;
+use jsonrpc_core::route::Route;
+use jsonrpc_core::Data;
 use jsonrpc_lite::Error as JsonRpcError;
 use jsonrpc_websocket::WsServer;
 use serde::{Deserialize, Serialize};
