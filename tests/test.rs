@@ -1,13 +1,12 @@
+use jsonrpc::route::route_jsonrpc;
+use jsonrpc::route::Route;
+use jsonrpc::Data;
 use jsonrpc_lite::Error as JsonRpcError;
-use jsonrpc_ws::route::Route;
-use jsonrpc_ws::Data;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio::time::{self, Duration};
-use jsonrpc_ws::route::route_jsonrpc;
-
 
 #[derive(Debug)]
 pub struct ShareStateTest {
@@ -115,16 +114,20 @@ async fn test_server_route_and_array() {
     );
 
     let tasks = async move {
-        let resp: Value = serde_json::from_str(&route_jsonrpc(
-            route.clone(),
-            &json!({
-                "jsonrpc": "2.0",
-                "method": "route_b",
-                "params": {"err_param": 1},
-                "id": 99,
-            }).to_string(),
+        let resp: Value = serde_json::from_str(
+            &route_jsonrpc(
+                route.clone(),
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "route_b",
+                    "params": {"err_param": 1},
+                    "id": 99,
+                })
+                .to_string(),
+            )
+            .await,
         )
-        .await).unwrap();
+        .unwrap();
 
         assert_eq!(
             json!({"error":{"code":-32602,"message":"Invalid params"},"id":99,"jsonrpc":"2.0"})
@@ -132,26 +135,30 @@ async fn test_server_route_and_array() {
             resp.to_string()
         );
 
-        let resp: Value = serde_json::from_str(&route_jsonrpc(
-            route.clone(),
-            &json!([{
-                "jsonrpc": "2.0",
-                "method": "route_b",
-                "params": {"err_param": 1},
-                "id": 91,
-            },{
-                "jsonrpc": "2.0",
-                "method": "route_b",
-                "params": {"a": 8888u64, "b":"_8888_", "c":["c","_string_","_8888_"]},
-                "id": 92,
-            },{
-                "jsonrpc": "2.0",
-                "method": "route_b",
-                "params": {"a": 8888u64, "b":"_8888_", "c":["c","_string_","_8888_"]},
-                "id": 93,
-            }]).to_string(),
+        let resp: Value = serde_json::from_str(
+            &route_jsonrpc(
+                route.clone(),
+                &json!([{
+                    "jsonrpc": "2.0",
+                    "method": "route_b",
+                    "params": {"err_param": 1},
+                    "id": 91,
+                },{
+                    "jsonrpc": "2.0",
+                    "method": "route_b",
+                    "params": {"a": 8888u64, "b":"_8888_", "c":["c","_string_","_8888_"]},
+                    "id": 92,
+                },{
+                    "jsonrpc": "2.0",
+                    "method": "route_b",
+                    "params": {"a": 8888u64, "b":"_8888_", "c":["c","_string_","_8888_"]},
+                    "id": 93,
+                }])
+                .to_string(),
+            )
+            .await,
         )
-        .await).unwrap();
+        .unwrap();
 
         let resp_vec = match resp {
             Value::Array(array) => array,

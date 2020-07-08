@@ -2,16 +2,12 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use std::env;
 use std::{
-    future::Future,
-    pin::Pin,
     sync::{Arc, Mutex},
-    task::{Context, Poll, Waker},
-    thread,
     time::Duration,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::{spawn, time};
+use tokio::net::TcpStream;
+use tokio::time;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
@@ -81,7 +77,7 @@ async fn receiver_loop(
                         Err(false)
                     }
                 }
-                Some(Err(err)) => {
+                Some(Err(_)) => {
                     log::warn!("server close connect");
                     Err(true)
                 }

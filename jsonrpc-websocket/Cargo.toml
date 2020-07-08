@@ -1,5 +1,5 @@
 [package]
-name = "jsonrpc-websock"
+name = "jsonrpc-websocket"
 version = "0.1.0"
 authors = ["xujian <s1473561555@sina.com>"]
 edition = "2018"
@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "jsonrpc_websock"
+name = "jsonrpc_websocket"
 path = "src/lib.rs"
 
 
@@ -18,7 +18,7 @@ tokio-tungstenite = "0.10.1"
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "sink", "std"] }
 url = "2.0.0"
 jsonrpc-lite = "0.5.0"
-jsonrpc-ws = { path = "../../jsonrpc-ws" }
+jsonrpc = { path = "../../jsonrpc-ws" }
 log = "0.4.8"
 
 

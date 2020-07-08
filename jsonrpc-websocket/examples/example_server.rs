@@ -1,9 +1,9 @@
-extern crate jsonrpc_websock;
+extern crate jsonrpc_websocket;
 
+use jsonrpc::route::Route;
+use jsonrpc::Data;
 use jsonrpc_lite::Error as JsonRpcError;
-use jsonrpc_websock::WsServer;
-use jsonrpc_ws::route::Route;
-use jsonrpc_ws::Data;
+use jsonrpc_websocket::WsServer;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::{Arc, RwLock};
@@ -17,8 +17,7 @@ pub enum ExampleError {
 impl Into<JsonRpcError> for ExampleError {
     fn into(self) -> JsonRpcError {
         let (code, message) = match self {
-            ParamIsNone => (1000i64, "Param is none"),
-            _ => (9999i64, "Unexpect error"),
+            ExampleError::ParamIsNone => (1000i64, "Param is none"),
         };
 
         JsonRpcError {

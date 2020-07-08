@@ -1,6 +1,6 @@
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use jsonrpc_ws::route::{route_jsonrpc, Route};
+use jsonrpc::route::{route_jsonrpc, Route};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -14,7 +14,6 @@ type WebSockReadHalf = SplitStream<WebSocketStream<TcpStream>>;
 const REQ_QUEUE_LEN: usize = 10;
 
 pub struct WsServer {
-    bind_transport: String,
     listener: TcpListener,
 }
 
@@ -26,10 +25,7 @@ impl WsServer {
 
         log::info!("Listening on: {}", &bind_transport);
 
-        let instance = Self {
-            bind_transport,
-            listener,
-        };
+        let instance = Self { listener };
 
         Ok(instance)
     }
@@ -50,15 +46,15 @@ impl WsServer {
             .peer_addr()
             .map_err(|err| format!("get client peer_addr error, with info: {}", err))?;
 
-        let mut ws_stream = accept_async(stream)
+        let ws_stream = accept_async(stream)
             .await
             .map_err(|err| format!("ws_stream accept error, with info: {}", err))?;
 
         log::info!("client {} connect", peer);
-        let (mut write_half, mut read_half) = ws_stream.split();
+        let (write_half, read_half) = ws_stream.split();
 
-        let (mut req_pipe_in, mut req_pipe_out) = mpsc::channel(REQ_QUEUE_LEN);
-        let (mut resp_pipe_in, mut resp_pipe_out) = mpsc::channel(REQ_QUEUE_LEN);
+        let (req_pipe_in, req_pipe_out) = mpsc::channel(REQ_QUEUE_LEN);
+        let (resp_pipe_in, resp_pipe_out) = mpsc::channel(REQ_QUEUE_LEN);
 
         tokio::select! {
             _ = Self::dispatch_loop(route, req_pipe_out, resp_pipe_in) => {
@@ -93,7 +89,7 @@ impl WsServer {
     async fn read_half_loop(mut read_half: WebSockReadHalf, mut req_pipe_in: mpsc::Sender<String>) {
         while let Some(ans) = read_half.next().await {
             match ans {
-                Err(err) => {
+                Err(_) => {
                     return;
                 }
                 Ok(Message::Text(msg_str)) => {
